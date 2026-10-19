@@ -1,0 +1,8 @@
+# One plugin ID per line; jenkins-plugin-cli resolves compatible versions and
+# their dependencies at build time. Pin as plugin:version for fully
+# reproducible images once you have a known-good set.
+workflow-aggregator
+git
+credentials-binding
+timestamper
+ws-cleanup
