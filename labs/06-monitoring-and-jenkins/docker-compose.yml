@@ -1,0 +1,34 @@
+# Lab 6 stack. All services share one Compose network and reach each other by
+# service name, so no host-network mode or 172.17.0.1 addresses are needed.
+name: lab6
+
+services:
+  exporter:
+    build:
+      context: exporter
+      target: runtime
+    environment:
+      ARRIVAL_MAX: ${ARRIVAL_MAX:-3}
+      DURATION_MAX: ${DURATION_MAX:-40}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  prometheus:
+    build: prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - exporter
+    restart: unless-stopped
+
+  grafana:
+    build: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD (see .env.example)}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
