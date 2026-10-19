@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-.venv/
-.git/
-.env
-test_app.py
-*.sh
-README.md
