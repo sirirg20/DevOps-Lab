@@ -1,0 +1,29 @@
+groups:
+  - name: delivery
+    rules:
+      - alert: HighPendingDeliveries
+        expr: deliveries_pending > 15
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Delivery backlog is growing"
+          description: "{{ $value }} orders have been waiting to dispatch for over 30s (threshold 15)."
+
+      - alert: HighAverageDeliveryTime
+        # Windowed average over the last minute, not cumulative since startup.
+        expr: rate(delivery_duration_seconds_sum[1m]) / rate(delivery_duration_seconds_count[1m]) > 30
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Deliveries are taking too long"
+          description: "Average delivery time over the last minute is {{ $value }}s (threshold 30s)."
+
+      - alert: DeliveryServiceDown
+        expr: up{job="delivery_service"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Delivery exporter is not being scraped"
