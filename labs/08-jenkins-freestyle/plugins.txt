@@ -1,5 +1,0 @@
-# Freestyle projects and "Execute shell" are built in; the Git plugin provides
-# Source Code Management. Versions are resolved at build time.
-git
-credentials-binding
-timestamper
