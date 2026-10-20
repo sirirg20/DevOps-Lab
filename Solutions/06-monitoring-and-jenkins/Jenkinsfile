@@ -1,0 +1,113 @@
+// Lab 6 pipeline: test, validate and deploy the delivery-monitoring stack.
+// Needs: Docker CLI + Compose plugin in the agent, the host Docker socket, and
+// a "Secret text" credential with ID grafana-admin-password.
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+    }
+
+    parameters {
+        string(name: 'ARRIVAL_MAX', defaultValue: '3', description: 'Max new orders per second in the simulator (8 triggers the backlog alert)')
+        string(name: 'DURATION_MAX', defaultValue: '40', description: 'Max delivery time in seconds (80 triggers the slow-delivery alert)')
+        booleanParam(name: 'TEARDOWN', defaultValue: false, description: 'Remove the stack at the end of the run')
+    }
+
+    environment {
+        LAB_DIR = 'labs/06-monitoring-and-jenkins'
+        COMPOSE_PROJECT_NAME = 'lab6'
+    }
+
+    stages {
+        stage('Pre-check Docker') {
+            steps {
+                sh '''
+                    docker version --format 'client {{.Client.Version}} / server {{.Server.Version}}'
+                    docker compose version
+                '''
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                // The test stage of the exporter Dockerfile runs unittest; a failure fails the build.
+                dir(env.LAB_DIR) {
+                    sh 'docker build --target test -t lab6-exporter-test exporter'
+                }
+            }
+        }
+
+        stage('Validate monitoring config') {
+            steps {
+                dir(env.LAB_DIR) {
+                    sh '''
+                        docker build -t lab6-prometheus-check prometheus
+                        docker run --rm --entrypoint promtool lab6-prometheus-check \
+                            check config /etc/prometheus/prometheus.yml
+                    '''
+                }
+            }
+        }
+
+        stage('Build images') {
+            steps {
+                dir(env.LAB_DIR) {
+                    withCredentials([string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')]) {
+                        sh 'docker compose build'
+                    }
+                }
+            }
+        }
+
+        stage('Deploy stack') {
+            steps {
+                dir(env.LAB_DIR) {
+                    withCredentials([string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')]) {
+                        withEnv(["ARRIVAL_MAX=${params.ARRIVAL_MAX}", "DURATION_MAX=${params.DURATION_MAX}"]) {
+                            sh 'docker compose up -d'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Smoke test') {
+            steps {
+                dir(env.LAB_DIR) {
+                    sh './smoke_test.sh'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            dir(env.LAB_DIR) {
+                withCredentials([string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')]) {
+                    sh 'docker compose ps || true'
+                }
+            }
+        }
+        failure {
+            dir(env.LAB_DIR) {
+                withCredentials([string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')]) {
+                    sh 'docker compose logs --tail=50 || true'
+                }
+            }
+        }
+        cleanup {
+            script {
+                if (params.TEARDOWN) {
+                    dir(env.LAB_DIR) {
+                        withCredentials([string(credentialsId: 'grafana-admin-password', variable: 'GRAFANA_ADMIN_PASSWORD')]) {
+                            sh 'docker compose down -v'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
