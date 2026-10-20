@@ -12,7 +12,7 @@ type NodePort, readiness probe.
 ## Prerequisites
 
 - Minikube, kubectl, and a driver (Docker is the default here). See
-  [../../docs/prerequisites.md](../../docs/prerequisites.md).
+  [../../docs/prerequisites.md](../../docs/prerequisites.md)..
 
 ## Files
 
