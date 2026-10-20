@@ -1,0 +1,61 @@
+# AppArmor profile for the Lab 5 Flask container.
+#
+# Strategy: like Docker's own docker-default profile, start from broad file
+# access and then add explicit deny rules. In AppArmor a deny always wins over
+# an allow, so the denies below hold regardless of the permissive base rules.
+#
+# Why not "deny /etc/**" or "deny /usr/bin/**" outright? The Python process and
+# the dynamic loader need to read parts of /etc and the interpreter lives in
+# /usr/local/bin, so blanket rules can stop the app from starting. These rules
+# target what the lab wants to demonstrate instead.
+#
+# Load:   sudo apparmor_parser -r profile/lab5-restricted
+# Check:  sudo apparmor_parser -Q -K profile/lab5-restricted   (syntax only)
+# Unload: sudo apparmor_parser -R profile/lab5-restricted
+
+#include <tunables/global>
+
+profile lab5-restricted flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Networking: TCP/UDP for the web server, unix sockets for local IPC.
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network unix,
+
+  # Broad file access as the base; denies below take precedence.
+  file,
+  umask,
+
+  signal (receive) peer=unconfined,
+  signal (send,receive) peer=lab5-restricted,
+
+  # Sensitive account files may not be read.
+  deny /etc/passwd r,
+  deny /etc/shadow* rwklx,
+  deny /etc/sudoers* rwklx,
+
+  # No writing to variable data directories.
+  deny /var/** wklx,
+  deny /var/ w,
+
+  # No executing system binaries (shells, coreutils). The Python interpreter in
+  # /usr/local/bin is deliberately left alone so the app keeps running.
+  deny /bin/** mx,
+  deny /sbin/** mx,
+  deny /usr/bin/** mx,
+  deny /usr/sbin/** mx,
+
+  # Capabilities: allow binding low ports, refuse administrative operations.
+  capability net_bind_service,
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_ptrace,
+
+  # No mounting and no writing to kernel tunables.
+  deny mount,
+  deny umount,
+  deny @{PROC}/sys/** w,
+  deny /sys/** w,
+}
