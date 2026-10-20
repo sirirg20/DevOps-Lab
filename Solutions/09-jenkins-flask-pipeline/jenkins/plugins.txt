@@ -1,0 +1,7 @@
+# Declarative Pipeline, Git checkout, JUnit test reports, log timestamps.
+# Versions are resolved at build time.
+workflow-aggregator
+git
+junit
+timestamper
+credentials-binding

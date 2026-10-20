@@ -1,0 +1,117 @@
+// Lab 9: multi-stage pipeline for the Flask app.
+// Prepare -> Build -> Lint -> Test -> Package -> Deploy -> Smoke test
+// The shell logic lives in ci/*.sh so it can be tested outside Jenkins.
+// Needs on the agent: git, python3 with venv/pip (the lab's Jenkins image has them).
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 15, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    parameters {
+        booleanParam(name: 'DEPLOY', defaultValue: true, description: 'Run the Deploy and Smoke test stages')
+        string(name: 'KEEP_RELEASES', defaultValue: '3', description: 'How many releases to keep on disk')
+    }
+
+    environment {
+        LAB_DIR     = 'labs/09-jenkins-flask-pipeline'
+        DEPLOY_ROOT = "${env.JENKINS_HOME}/deploy/flask-app"
+        APP_PORT    = '5001'
+    }
+
+    stages {
+        stage('Prepare') {
+            steps {
+                sh '''
+                    git --version
+                    python3 --version
+                    python3 -m venv --help >/dev/null
+                    echo "commit: $(git rev-parse --short HEAD)"
+                '''
+            }
+        }
+
+        stage('Build') {
+            steps {
+                // A real build: create an isolated environment and install pinned dependencies.
+                dir(env.LAB_DIR) {
+                    sh '''
+                        python3 -m venv .venv
+                        .venv/bin/pip install --quiet --upgrade pip
+                        .venv/bin/pip install --quiet -r app/requirements-dev.txt
+                    '''
+                }
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                dir(env.LAB_DIR) {
+                    sh '.venv/bin/flake8 --config app/.flake8 app'
+                }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                dir(env.LAB_DIR + '/app') {
+                    sh '../.venv/bin/python -m pytest -q --junitxml=../reports/junit.xml'
+                }
+            }
+            post {
+                always {
+                    dir(env.LAB_DIR) {
+                        junit testResults: 'reports/junit.xml', allowEmptyResults: false
+                    }
+                }
+            }
+        }
+
+        stage('Package') {
+            steps {
+                dir(env.LAB_DIR) {
+                    sh 'ci/package.sh "$BUILD_NUMBER" dist'
+                    archiveArtifacts artifacts: 'dist/*.tar.gz', fingerprint: true
+                }
+            }
+        }
+
+        stage('Deploy') {
+            when { expression { return params.DEPLOY } }
+            steps {
+                dir(env.LAB_DIR) {
+                    sh 'ci/deploy.sh "dist/flask-app-${BUILD_NUMBER}.tar.gz" "$DEPLOY_ROOT" "$KEEP_RELEASES"'
+                }
+            }
+        }
+
+        stage('Smoke test') {
+            when { expression { return params.DEPLOY } }
+            steps {
+                dir(env.LAB_DIR) {
+                    sh '''
+                        ci/run_app.sh start
+                        EXPECTED_VERSION="$BUILD_NUMBER" ci/smoke_test.sh "http://127.0.0.1:$APP_PORT"
+                    '''
+                }
+            }
+            post {
+                always {
+                    // Never leave the app running, whatever happened above.
+                    dir(env.LAB_DIR) {
+                        sh 'ci/run_app.sh stop'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success { echo "Build #${env.BUILD_NUMBER} passed: package archived${params.DEPLOY ? ' and deployed' : ''}." }
+        failure { echo "Build #${env.BUILD_NUMBER} failed; see the first failing stage above." }
+    }
+}
